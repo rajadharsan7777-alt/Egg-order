@@ -22,16 +22,21 @@ const DB_FILE_PATH = path.join(__dirname, 'farm_server_db.json');
 const OWNER_USERNAME = 'kozhifarmrajadharsan@24052026';
 const OWNER_PASSWORD = '15042006@24052026';
 
+// Known paired Cloud Run origins (Dev preview <-> Published external link)
+const KNOWN_DEV_ORIGIN = 'https://ais-dev-xsz75de4goigjjqvnenvko-963468854939.asia-southeast1.run.app';
+const KNOWN_PRE_ORIGIN = 'https://ais-pre-xsz75de4goigjjqvnenvko-963468854939.asia-southeast1.run.app';
+
 interface ServerDatabase {
   rates: NattuKozhiRateSettings;
   settings: FarmSettings;
   orders: OrderRecord[];
   notifications: NotificationItem[];
   ownerTokens: string[];
+  version: number;
   updatedAt: string;
 }
 
-// Deterministic HMAC token so owner session remains valid across server restarts
+// Deterministic HMAC token so owner session remains valid across server restarts & peer instances
 const STATIC_OWNER_TOKEN = crypto
   .createHmac('sha256', `${OWNER_USERNAME}:${OWNER_PASSWORD}`)
   .update('rehoboth_owner_server_session_v1')
@@ -49,6 +54,43 @@ function validateServerUtr(rawUtr: string): { valid: boolean; cleanUtr: string; 
   }
 
   return { valid: true, cleanUtr };
+}
+
+function mergeOrdersLists(primary: OrderRecord[], secondary: OrderRecord[]): OrderRecord[] {
+  const map = new Map<string, OrderRecord>();
+  for (const o of secondary) {
+    if (o && o.id) {
+      map.set(o.id, o);
+    }
+  }
+  for (const o of primary) {
+    if (o && o.id) {
+      map.set(o.id, o);
+    }
+  }
+  return Array.from(map.values()).sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+  );
+}
+
+function mergeNotificationsLists(
+  primary: NotificationItem[],
+  secondary: NotificationItem[]
+): NotificationItem[] {
+  const map = new Map<string, NotificationItem>();
+  for (const n of secondary) {
+    if (n && n.id) {
+      map.set(n.id, n);
+    }
+  }
+  for (const n of primary) {
+    if (n && n.id) {
+      map.set(n.id, n);
+    }
+  }
+  return Array.from(map.values()).sort(
+    (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+  );
 }
 
 function loadDatabase(): ServerDatabase {
@@ -86,14 +128,15 @@ function loadDatabase(): ServerDatabase {
                 customerName: 'Senthil Kumar',
                 totalAmount: 350,
                 totalEggs: 30,
-                timestamp: new Date(Date.now() - 40 * 60 * 1000).toISOString(),
+                timestamp: '2026-01-01T00:00:00.000Z',
                 read: false,
               },
             ],
         ownerTokens: Array.isArray(parsed.ownerTokens)
           ? Array.from(new Set([...parsed.ownerTokens, STATIC_OWNER_TOKEN]))
           : [STATIC_OWNER_TOKEN],
-        updatedAt: parsed.updatedAt || new Date().toISOString(),
+        version: typeof parsed.version === 'number' && parsed.version >= 1 ? parsed.version : 10,
+        updatedAt: parsed.updatedAt || '2026-01-01T00:00:00.000Z',
       };
     }
   } catch (err) {
@@ -111,21 +154,24 @@ function loadDatabase(): ServerDatabase {
         customerName: 'Senthil Kumar',
         totalAmount: 350,
         totalEggs: 30,
-        timestamp: new Date(Date.now() - 40 * 60 * 1000).toISOString(),
+        timestamp: '2026-01-01T00:00:00.000Z',
         read: false,
       },
     ],
-    ownerTokens: [],
-    updatedAt: new Date().toISOString(),
+    ownerTokens: [STATIC_OWNER_TOKEN],
+    version: 10,
+    updatedAt: '2026-01-01T00:00:00.000Z',
   };
-  saveDatabase(initialDb);
+  saveDatabase(initialDb, false);
   return initialDb;
 }
 
-function saveDatabase(dbData: ServerDatabase): void {
+function saveDatabase(dbData: ServerDatabase, bumpTimestamp = true): void {
   try {
     dbData.settings.ownerPhone = '';
-    dbData.updatedAt = new Date().toISOString();
+    if (bumpTimestamp) {
+      dbData.updatedAt = new Date().toISOString();
+    }
     fs.writeFileSync(DB_FILE_PATH, JSON.stringify(dbData, null, 2), 'utf-8');
   } catch (err) {
     console.error('Failed to persist farm_server_db.json:', err);
@@ -142,6 +188,7 @@ function broadcastStateUpdate(): void {
     type: 'state_update',
     rates: dbState.rates,
     settings: { ...dbState.settings, ownerPhone: '' },
+    version: dbState.version,
     updatedAt: dbState.updatedAt,
   });
 
@@ -168,17 +215,158 @@ function isValidOwnerRequest(req: Request): boolean {
   return token === STATIC_OWNER_TOKEN || dbState.ownerTokens.includes(token);
 }
 
+function resolvePeerOrigins(req?: Request): string[] {
+  const peers = new Set<string>();
+  const rawHost = String(
+    req?.headers['x-forwarded-host'] || req?.headers.host || ''
+  )
+    .split(',')[0]
+    .trim();
+
+  if (rawHost.includes('ais-dev-')) {
+    peers.add(`https://${rawHost.replace('ais-dev-', 'ais-pre-')}`);
+  } else if (rawHost.includes('ais-pre-')) {
+    peers.add(`https://${rawHost.replace('ais-pre-', 'ais-dev-')}`);
+  } else {
+    peers.add(KNOWN_DEV_ORIGIN);
+    peers.add(KNOWN_PRE_ORIGIN);
+  }
+
+  return Array.from(peers);
+}
+
+// Push current state to peer server (ais-dev <-> ais-pre) so both environments stay 100% identical
+async function pushStateToPeerServers(req?: Request): Promise<void> {
+  if (req?.headers['x-peer-sync'] === '1') return;
+  const peers = resolvePeerOrigins(req);
+
+  const payload = JSON.stringify({
+    rates: dbState.rates,
+    settings: dbState.settings,
+    orders: dbState.orders,
+    notifications: dbState.notifications,
+    version: dbState.version,
+    updatedAt: dbState.updatedAt,
+  });
+
+  await Promise.allSettled(
+    peers.map(async (peerOrigin) => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 3500);
+      try {
+        await fetch(`${peerOrigin}/api/admin/sync-peer`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${STATIC_OWNER_TOKEN}`,
+            'X-Peer-Sync': '1',
+          },
+          body: payload,
+          signal: controller.signal,
+        });
+      } catch {
+        // Peer may be asleep or unreachable; ignore
+      } finally {
+        clearTimeout(timer);
+      }
+    })
+  );
+}
+
+let lastPeerPullAt = 0;
+let isPullingFromPeer = false;
+
+async function pullStateFromPeerServersIfNeeded(req?: Request): Promise<void> {
+  if (req?.headers['x-peer-sync'] === '1') return;
+  const now = Date.now();
+  if (isPullingFromPeer || now - lastPeerPullAt < 2500) return;
+
+  isPullingFromPeer = true;
+  lastPeerPullAt = now;
+
+  try {
+    const peers = resolvePeerOrigins(req);
+    for (const peerOrigin of peers) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 2200);
+      try {
+        const res = await fetch(`${peerOrigin}/api/state`, {
+          headers: {
+            Authorization: `Bearer ${STATIC_OWNER_TOKEN}`,
+            'X-Peer-Sync': '1',
+          },
+          signal: controller.signal,
+        });
+        if (!res.ok) continue;
+        const peerData = (await res.json()) as Partial<ServerDatabase>;
+        const peerVersion = typeof peerData.version === 'number' ? peerData.version : 0;
+
+        let changed = false;
+        if (peerVersion > dbState.version) {
+          if (peerData.rates) dbState.rates = { ...dbState.rates, ...peerData.rates };
+          if (peerData.settings) {
+            dbState.settings = { ...dbState.settings, ...peerData.settings, ownerPhone: '' };
+          }
+          dbState.version = peerVersion;
+          dbState.updatedAt = peerData.updatedAt || new Date().toISOString();
+          changed = true;
+        }
+
+        if (Array.isArray(peerData.orders) && peerData.orders.length > 0) {
+          const mergedOrders = mergeOrdersLists(
+            peerVersion >= dbState.version ? peerData.orders : dbState.orders,
+            peerVersion >= dbState.version ? dbState.orders : peerData.orders
+          );
+          if (JSON.stringify(mergedOrders) !== JSON.stringify(dbState.orders)) {
+            dbState.orders = mergedOrders;
+            changed = true;
+          }
+        }
+
+        if (Array.isArray(peerData.notifications) && peerData.notifications.length > 0) {
+          const mergedNotifs = mergeNotificationsLists(
+            peerVersion >= dbState.version ? peerData.notifications : dbState.notifications,
+            peerVersion >= dbState.version ? dbState.notifications : peerData.notifications
+          );
+          if (JSON.stringify(mergedNotifs) !== JSON.stringify(dbState.notifications)) {
+            dbState.notifications = mergedNotifs;
+            changed = true;
+          }
+        }
+
+        if (changed) {
+          saveDatabase(dbState, false);
+          broadcastStateUpdate();
+        }
+      } catch {
+        // Ignore peer timeout
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+  } finally {
+    isPullingFromPeer = false;
+  }
+}
+
 async function startServer() {
   const app = express();
   const PORT = Number(process.env.PORT) || 3000;
 
   app.use(express.json({ limit: '1mb' }));
 
-  // Prevent caching on API routes so all devices always get fresh live rates
-  app.use('/api', (_req, res, next) => {
+  // Enable CORS + prevent caching on API routes so dev & published links can sync directly
+  app.use('/api', (req, res, next) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Peer-Sync');
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     res.setHeader('Pragma', 'no-cache');
     res.setHeader('Expires', '0');
+    if (req.method === 'OPTIONS') {
+      res.status(204).end();
+      return;
+    }
     next();
   });
 
@@ -193,6 +381,7 @@ async function startServer() {
       type: 'state_update',
       rates: dbState.rates,
       settings: { ...dbState.settings, ownerPhone: '' },
+      version: dbState.version,
       updatedAt: dbState.updatedAt,
     });
     res.write(`data: ${initialPayload}\n\n`);
@@ -215,11 +404,16 @@ async function startServer() {
   });
 
   // 2. Get current storefront state (rates & settings for all devices; orders/notifications if owner token is valid)
-  app.get('/api/state', (req: Request, res: Response) => {
+  app.get('/api/state', async (req: Request, res: Response) => {
+    if (req.headers['x-peer-sync'] !== '1') {
+      await pullStateFromPeerServersIfNeeded(req);
+    }
+
     const isOwner = isValidOwnerRequest(req);
     res.json({
       rates: dbState.rates,
       settings: { ...dbState.settings, ownerPhone: '' },
+      version: dbState.version,
       updatedAt: dbState.updatedAt,
       isOwnerAuthenticated: isOwner,
       orders: isOwner ? dbState.orders : undefined,
@@ -227,13 +421,69 @@ async function startServer() {
     });
   });
 
+  // 2b. Peer & Owner Client State Reconciliation Endpoint
+  app.post('/api/admin/sync-peer', (req: Request, res: Response) => {
+    if (!isValidOwnerRequest(req)) {
+      res.status(403).json({ error: 'Unauthorized peer sync' });
+      return;
+    }
+
+    const incoming = req.body as Partial<ServerDatabase> | undefined;
+    if (!incoming) {
+      res.status(400).json({ error: 'Missing sync payload' });
+      return;
+    }
+
+    const incomingVersion = typeof incoming.version === 'number' ? incoming.version : 0;
+    let changed = false;
+
+    if (incomingVersion >= dbState.version) {
+      if (incoming.rates) {
+        dbState.rates = { ...dbState.rates, ...incoming.rates };
+        changed = true;
+      }
+      if (incoming.settings) {
+        dbState.settings = { ...dbState.settings, ...incoming.settings, ownerPhone: '' };
+        changed = true;
+      }
+      dbState.version = Math.max(dbState.version, incomingVersion);
+      if (incoming.updatedAt) {
+        dbState.updatedAt = incoming.updatedAt;
+      }
+    }
+
+    if (Array.isArray(incoming.orders) && incoming.orders.length > 0) {
+      dbState.orders = mergeOrdersLists(incoming.orders, dbState.orders);
+      changed = true;
+    }
+
+    if (Array.isArray(incoming.notifications) && incoming.notifications.length > 0) {
+      dbState.notifications = mergeNotificationsLists(incoming.notifications, dbState.notifications);
+      changed = true;
+    }
+
+    if (changed) {
+      saveDatabase(dbState, false);
+      broadcastStateUpdate();
+    }
+
+    res.json({
+      success: true,
+      version: dbState.version,
+      rates: dbState.rates,
+      settings: dbState.settings,
+    });
+  });
+
   // 3. Track a specific order by Order ID or Customer Mobile Number (Public Customer Tracker)
-  app.get('/api/orders/track', (req: Request, res: Response) => {
+  app.get('/api/orders/track', async (req: Request, res: Response) => {
     const query = String(req.query.q || '').trim().toLowerCase();
     if (!query) {
       res.status(400).json({ error: 'Search query is required' });
       return;
     }
+
+    await pullStateFromPeerServersIfNeeded(req);
 
     const cleanDigits = query.replace(/\D/g, '');
     const found = dbState.orders.find(
@@ -271,11 +521,17 @@ async function startServer() {
       return;
     }
 
+    const existingOrder = dbState.orders.find((o) => o.id === incomingOrder.id);
+    if (existingOrder) {
+      res.status(200).json({ order: existingOrder, version: dbState.version });
+      return;
+    }
+
     // Immediately confirm order upon valid 12-digit UTR submission
     const newOrder: OrderRecord = {
       ...incomingOrder,
       upiReferenceId: utrCheck.cleanUtr,
-      createdAt: new Date().toISOString(),
+      createdAt: incomingOrder.createdAt || new Date().toISOString(),
       status: 'confirmed_packing',
       estimatedDelivery: 'Confirmed & Packing Fresh Country Eggs',
     };
@@ -283,7 +539,7 @@ async function startServer() {
     dbState.orders = [newOrder, ...dbState.orders];
 
     const newNotif: NotificationItem = {
-      id: `notif_${Date.now()}`,
+      id: `notif_${newOrder.id}`,
       orderId: newOrder.id,
       customerName: newOrder.customer.fullName,
       totalAmount: newOrder.totalAmount,
@@ -291,29 +547,34 @@ async function startServer() {
       timestamp: newOrder.createdAt,
       read: false,
     };
-    dbState.notifications = [newNotif, ...dbState.notifications];
+    dbState.notifications = mergeNotificationsLists([newNotif], dbState.notifications);
+    dbState.version += 1;
 
     saveDatabase(dbState);
     broadcastStateUpdate();
+    void pushStateToPeerServers(req);
 
-    res.status(201).json({ order: newOrder });
+    res.status(201).json({ order: newOrder, version: dbState.version });
   });
 
   // 5. Owner Server Login (Strictly verifies credentials on server)
-  app.post('/api/admin/login', (req: Request, res: Response) => {
+  app.post('/api/admin/login', async (req: Request, res: Response) => {
     const username = String(req.body?.username || '').trim();
     const password = String(req.body?.password || '').trim();
 
     if (username === OWNER_USERNAME && password === OWNER_PASSWORD) {
+      await pullStateFromPeerServersIfNeeded(req);
+
       const token = STATIC_OWNER_TOKEN;
       if (!dbState.ownerTokens.includes(token)) {
         dbState.ownerTokens = [...dbState.ownerTokens.slice(-19), token];
       }
-      saveDatabase(dbState);
+      saveDatabase(dbState, false);
 
       res.json({
         success: true,
         token,
+        version: dbState.version,
         rates: dbState.rates,
         settings: dbState.settings,
         orders: dbState.orders,
@@ -333,7 +594,7 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  // 7. Owner Updates Daily Egg Rates (Broadcasts to ALL devices immediately)
+  // 7. Owner Updates Daily Egg Rates (Broadcasts to ALL devices + Peer Server immediately)
   app.put('/api/admin/rates', (req: Request, res: Response) => {
     if (!isValidOwnerRequest(req)) {
       res.status(403).json({ error: 'Unauthorized. Owner server token required.' });
@@ -365,17 +626,22 @@ async function startServer() {
           : dbState.rates.harvestStamp,
     };
 
+    const clientVersion = typeof req.body?.version === 'number' ? req.body.version : 0;
+    dbState.version = Math.max(dbState.version, clientVersion) + 1;
+
     saveDatabase(dbState);
     broadcastStateUpdate();
+    void pushStateToPeerServers(req);
 
     res.json({
       success: true,
       rates: dbState.rates,
+      version: dbState.version,
       updatedAt: dbState.updatedAt,
     });
   });
 
-  // 8. Owner Updates Farm & GPay QR Settings (Broadcasts to ALL devices immediately)
+  // 8. Owner Updates Farm & GPay QR Settings (Broadcasts to ALL devices + Peer Server immediately)
   app.put('/api/admin/settings', (req: Request, res: Response) => {
     if (!isValidOwnerRequest(req)) {
       res.status(403).json({ error: 'Unauthorized. Owner server token required.' });
@@ -391,6 +657,7 @@ async function startServer() {
     dbState.settings = {
       ...dbState.settings,
       ...incomingSettings,
+      ownerPhone: '',
       deliveryFee:
         typeof incomingSettings.deliveryFee === 'number'
           ? incomingSettings.deliveryFee
@@ -401,12 +668,17 @@ async function startServer() {
           : dbState.settings.freeDeliveryThreshold,
     };
 
+    const clientVersion = typeof req.body?.version === 'number' ? req.body.version : 0;
+    dbState.version = Math.max(dbState.version, clientVersion) + 1;
+
     saveDatabase(dbState);
     broadcastStateUpdate();
+    void pushStateToPeerServers(req);
 
     res.json({
       success: true,
       settings: dbState.settings,
+      version: dbState.version,
       updatedAt: dbState.updatedAt,
     });
   });
@@ -446,13 +718,16 @@ async function startServer() {
       return o;
     });
 
+    dbState.version += 1;
     saveDatabase(dbState);
     broadcastStateUpdate();
+    void pushStateToPeerServers(req);
 
     res.json({
       success: true,
       order: updatedOrder,
       orders: dbState.orders,
+      version: dbState.version,
     });
   });
 
@@ -464,11 +739,14 @@ async function startServer() {
     }
 
     dbState.notifications = dbState.notifications.map((n) => ({ ...n, read: true }));
+    dbState.version += 1;
     saveDatabase(dbState);
+    void pushStateToPeerServers(req);
 
     res.json({
       success: true,
       notifications: dbState.notifications,
+      version: dbState.version,
     });
   });
 
@@ -495,6 +773,10 @@ async function startServer() {
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Rehoboth Muttai Pannai server running on http://0.0.0.0:${PORT}`);
+    // Reconcile state with peer server on startup
+    setTimeout(() => {
+      void pullStateFromPeerServersIfNeeded();
+    }, 1000);
   });
 }
 

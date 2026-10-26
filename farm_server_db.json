@@ -50,10 +50,10 @@
       "subtotal": 350,
       "deliveryFee": 0,
       "totalAmount": 350,
-      "status": "pending_payment",
+      "status": "confirmed_packing",
       "paymentMethod": "gpay_upi",
       "upiReferenceId": "126789654567",
-      "estimatedDelivery": "Fresh morning harvest delivery today",
+      "estimatedDelivery": "Confirmed & Packing Fresh Country Eggs",
       "notes": "Verified GPay payment receipt submitted"
     },
     {
@@ -182,5 +182,6 @@
   "ownerTokens": [
     "02c6135f852f10570b22696389d1a875aee49d3e79c3ba8429adf55fcffaac87"
   ],
-  "updatedAt": "2026-10-26T14:08:05.070Z"
+  "version": 10,
+  "updatedAt": "2026-01-01T00:00:00.000Z"
 }
