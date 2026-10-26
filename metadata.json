@@ -1,0 +1,6 @@
+{
+  "name": "Nattu Kozhi Farm - Pure Country Chicken Eggs Direct",
+  "description": "Official farm website for pure country chicken eggs (நாட்டுக்கோழி முட்டை) direct ordering, daily owner rate controls, GPay UPI QR scan payment, and live order tracking.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

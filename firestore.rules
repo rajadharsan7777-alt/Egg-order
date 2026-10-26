@@ -1,0 +1,172 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Global Safety Net (Default Deny)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 2. Hardened Primitives
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isAdmin() {
+      return isVerifiedUser() && (
+        request.auth.token.email == 'rajadharsan7777@gmail.com' ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    // 3. Entity Validation Blueprints
+    function isValidStorefrontConfig(data) {
+      return data.keys().hasAll([
+        'configId', 'ownerId', 'farmName', 'tamilFarmName', 'ownerName',
+        'ownerPhone', 'gpayUpiId', 'gpayName', 'deliveryFee',
+        'freeDeliveryThreshold', 'deliveryAreas', 'farmLocation',
+        'pricePerEgg', 'pack12Price', 'tray30Price', 'doubleTray60Price',
+        'bulk100Price', 'inStock', 'dailyHarvestCount', 'harvestStamp',
+        'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'configId', 'ownerId', 'farmName', 'tamilFarmName', 'ownerName',
+        'ownerPhone', 'gpayUpiId', 'gpayName', 'deliveryFee',
+        'freeDeliveryThreshold', 'deliveryAreas', 'farmLocation',
+        'pricePerEgg', 'pack12Price', 'tray30Price', 'doubleTray60Price',
+        'bulk100Price', 'inStock', 'dailyHarvestCount', 'harvestStamp',
+        'updatedAt'
+      ]) &&
+      data.configId is string && data.configId.size() >= 1 && data.configId.size() <= 64 && data.configId.matches('^[a-zA-Z0-9_\\-]+$') &&
+      data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 && data.ownerId.matches('^[a-zA-Z0-9_\\-]+$') &&
+      data.ownerId == request.auth.uid &&
+      data.farmName is string && data.farmName.size() >= 1 && data.farmName.size() <= 120 &&
+      data.tamilFarmName is string && data.tamilFarmName.size() >= 1 && data.tamilFarmName.size() <= 120 &&
+      data.ownerName is string && data.ownerName.size() >= 1 && data.ownerName.size() <= 80 &&
+      data.ownerPhone is string && data.ownerPhone.size() >= 10 && data.ownerPhone.size() <= 15 &&
+      data.gpayUpiId is string && data.gpayUpiId.size() >= 3 && data.gpayUpiId.size() <= 100 &&
+      data.gpayName is string && data.gpayName.size() >= 1 && data.gpayName.size() <= 100 &&
+      data.deliveryFee is number && data.deliveryFee >= 0 && data.deliveryFee <= 5000 &&
+      data.freeDeliveryThreshold is number && data.freeDeliveryThreshold >= 0 && data.freeDeliveryThreshold <= 100000 &&
+      data.deliveryAreas is string && data.deliveryAreas.size() >= 1 && data.deliveryAreas.size() <= 300 &&
+      data.farmLocation is string && data.farmLocation.size() >= 1 && data.farmLocation.size() <= 200 &&
+      data.pricePerEgg is number && data.pricePerEgg > 0 && data.pricePerEgg <= 1000 &&
+      data.pack12Price is number && data.pack12Price > 0 && data.pack12Price <= 20000 &&
+      data.tray30Price is number && data.tray30Price > 0 && data.tray30Price <= 50000 &&
+      data.doubleTray60Price is number && data.doubleTray60Price > 0 && data.doubleTray60Price <= 100000 &&
+      data.bulk100Price is number && data.bulk100Price > 0 && data.bulk100Price <= 200000 &&
+      data.inStock is bool &&
+      data.dailyHarvestCount is number && data.dailyHarvestCount >= 0 && data.dailyHarvestCount <= 1000000 &&
+      data.harvestStamp is string && data.harvestStamp.size() >= 1 && data.harvestStamp.size() <= 120 &&
+      data.updatedAt is timestamp;
+    }
+
+    function isValidEggOrder(data) {
+      return data.keys().hasAll([
+        'orderId', 'ownerId', 'customerName', 'customerPhone',
+        'customerAddress', 'customerLandmark', 'customerArea',
+        'customerPincode', 'deliverySlot', 'packKey', 'packName',
+        'quantity', 'totalEggs', 'subtotal', 'deliveryFee',
+        'totalAmount', 'status', 'upiReferenceId', 'estimatedDelivery',
+        'riderName', 'riderPhone', 'createdAt', 'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'orderId', 'ownerId', 'customerName', 'customerPhone',
+        'customerAddress', 'customerLandmark', 'customerArea',
+        'customerPincode', 'deliverySlot', 'packKey', 'packName',
+        'quantity', 'totalEggs', 'subtotal', 'deliveryFee',
+        'totalAmount', 'status', 'upiReferenceId', 'estimatedDelivery',
+        'riderName', 'riderPhone', 'createdAt', 'updatedAt'
+      ]) &&
+      data.orderId is string && data.orderId.size() >= 1 && data.orderId.size() <= 64 && data.orderId.matches('^[a-zA-Z0-9_\\-]+$') &&
+      data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 && data.ownerId.matches('^[a-zA-Z0-9_\\-]+$') &&
+      (data.ownerId == request.auth.uid || isAdmin()) &&
+      data.customerName is string && data.customerName.size() >= 1 && data.customerName.size() <= 100 &&
+      data.customerPhone is string && data.customerPhone.size() >= 10 && data.customerPhone.size() <= 15 &&
+      data.customerAddress is string && data.customerAddress.size() >= 1 && data.customerAddress.size() <= 300 &&
+      data.customerLandmark is string && data.customerLandmark.size() >= 0 && data.customerLandmark.size() <= 150 &&
+      data.customerArea is string && data.customerArea.size() >= 1 && data.customerArea.size() <= 120 &&
+      data.customerPincode is string && data.customerPincode.size() >= 0 && data.customerPincode.size() <= 12 &&
+      data.deliverySlot is string && data.deliverySlot.size() >= 1 && data.deliverySlot.size() <= 100 &&
+      data.packKey is string && data.packKey.size() >= 1 && data.packKey.size() <= 30 && data.packKey in ['pack_12', 'tray_30', 'tray_60', 'bulk_100'] &&
+      data.packName is string && data.packName.size() >= 1 && data.packName.size() <= 120 &&
+      data.quantity is number && data.quantity >= 1 && data.quantity <= 500 &&
+      data.totalEggs is number && data.totalEggs >= 12 && data.totalEggs <= 50000 &&
+      data.subtotal is number && data.subtotal > 0 && data.subtotal <= 5000000 &&
+      data.deliveryFee is number && data.deliveryFee >= 0 && data.deliveryFee <= 5000 &&
+      data.totalAmount is number && data.totalAmount > 0 && data.totalAmount <= 5005000 &&
+      data.status is string && data.status.size() >= 1 && data.status.size() <= 40 && data.status in ['pending_payment', 'confirmed_packing', 'out_for_delivery', 'delivered', 'cancelled'] &&
+      data.upiReferenceId is string && data.upiReferenceId.size() >= 6 && data.upiReferenceId.size() <= 32 &&
+      data.estimatedDelivery is string && data.estimatedDelivery.size() >= 1 && data.estimatedDelivery.size() <= 120 &&
+      data.riderName is string && data.riderName.size() >= 0 && data.riderName.size() <= 100 &&
+      data.riderPhone is string && data.riderPhone.size() >= 0 && data.riderPhone.size() <= 20 &&
+      data.createdAt is timestamp &&
+      data.updatedAt is timestamp;
+    }
+
+    function isValidAdminProfile(data) {
+      return data.keys().hasAll(['adminId', 'email', 'createdAt']) &&
+      data.keys().hasOnly(['adminId', 'email', 'createdAt']) &&
+      data.adminId is string && data.adminId.size() >= 1 && data.adminId.size() <= 128 && data.adminId.matches('^[a-zA-Z0-9_\\-]+$') &&
+      data.adminId == request.auth.uid &&
+      data.email is string && data.email.size() >= 3 && data.email.size() <= 120 &&
+      data.createdAt is timestamp;
+    }
+
+    // 4. Collection Match Blocks
+    match /storefront/{configId} {
+      allow get: if isSignedIn() && isValidId(configId) && (existing().ownerId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (existing().ownerId == request.auth.uid || isAdmin());
+      allow create: if isVerifiedUser() && isValidId(configId) && isValidStorefrontConfig(incoming()) && incoming().configId == configId && incoming().updatedAt == request.time && isAdmin();
+      allow update: if isVerifiedUser() && isValidStorefrontConfig(incoming()) && isValidId(configId) && incoming().configId == existing().configId && incoming().ownerId == existing().ownerId && incoming().updatedAt == request.time && isAdmin() && (
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'farmName', 'tamilFarmName', 'ownerName', 'ownerPhone',
+          'gpayUpiId', 'gpayName', 'deliveryFee', 'freeDeliveryThreshold',
+          'deliveryAreas', 'farmLocation', 'pricePerEgg', 'pack12Price',
+          'tray30Price', 'doubleTray60Price', 'bulk100Price', 'inStock',
+          'dailyHarvestCount', 'harvestStamp', 'updatedAt'
+        ]) || isAdmin()
+      );
+      allow delete: if isVerifiedUser() && isValidId(configId) && isAdmin();
+    }
+
+    match /orders/{orderId} {
+      allow get: if isSignedIn() && isValidId(orderId) && (existing().ownerId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (existing().ownerId == request.auth.uid || isAdmin());
+      allow create: if isVerifiedUser() && isValidId(orderId) && isValidEggOrder(incoming()) && incoming().orderId == orderId && incoming().ownerId == request.auth.uid && incoming().status == 'pending_payment' && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser() && isValidEggOrder(incoming()) && isValidId(orderId) && incoming().orderId == existing().orderId && incoming().ownerId == existing().ownerId && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time && (
+        !(existing().status in ['delivered', 'cancelled']) || isAdmin()
+      ) && (
+        isAdmin() ||
+        (existing().ownerId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(['customerLandmark', 'deliverySlot', 'updatedAt']))
+      );
+      allow delete: if isVerifiedUser() && isValidId(orderId) && isAdmin();
+    }
+
+    match /admins/{adminId} {
+      allow get: if isSignedIn() && isValidId(adminId) && (existing().adminId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (existing().adminId == request.auth.uid || isAdmin());
+      allow create: if isVerifiedUser() && isValidId(adminId) && isValidAdminProfile(incoming()) && incoming().adminId == adminId && incoming().createdAt == request.time && isAdmin();
+      allow update: if isVerifiedUser() && isValidAdminProfile(incoming()) && isValidId(adminId) && incoming().adminId == existing().adminId && incoming().createdAt == existing().createdAt && isAdmin() && (
+        incoming().diff(existing()).affectedKeys().hasOnly(['email']) || isAdmin()
+      );
+      allow delete: if isVerifiedUser() && isValidId(adminId) && isAdmin();
+    }
+  }
+}

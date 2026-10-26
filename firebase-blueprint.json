@@ -1,0 +1,346 @@
+{
+  "entities": {
+    "StorefrontConfig": {
+      "title": "StorefrontConfig",
+      "description": "Global farm storefront configuration including live Nattu Kozhi egg rates and GPay payment settings managed exclusively by the farm owner.",
+      "type": "object",
+      "properties": {
+        "configId": {
+          "type": "string",
+          "description": "Identifier for the configuration document",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "ownerId": {
+          "type": "string",
+          "description": "UID of the farm owner who last updated the configuration",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "farmName": {
+          "type": "string",
+          "description": "English name of the poultry farm",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "tamilFarmName": {
+          "type": "string",
+          "description": "Tamil name of the poultry farm",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "ownerName": {
+          "type": "string",
+          "description": "Name of the farm owner",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "ownerPhone": {
+          "type": "string",
+          "description": "Helpline phone number of the farm owner",
+          "minLength": 10,
+          "maxLength": 15
+        },
+        "gpayUpiId": {
+          "type": "string",
+          "description": "Google Pay / UPI VPA ID for collecting payments",
+          "minLength": 3,
+          "maxLength": 100
+        },
+        "gpayName": {
+          "type": "string",
+          "description": "Payee display name for UPI QR code",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "deliveryFee": {
+          "type": "number",
+          "description": "Standard delivery fee in INR"
+        },
+        "freeDeliveryThreshold": {
+          "type": "number",
+          "description": "Minimum order amount in INR for free delivery"
+        },
+        "deliveryAreas": {
+          "type": "string",
+          "description": "Supported delivery zones description",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "farmLocation": {
+          "type": "string",
+          "description": "Physical farm location",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "pricePerEgg": {
+          "type": "number",
+          "description": "Single Nattu Kozhi egg rate in INR"
+        },
+        "pack12Price": {
+          "type": "number",
+          "description": "12-egg pack price in INR"
+        },
+        "tray30Price": {
+          "type": "number",
+          "description": "30-egg tray price in INR"
+        },
+        "doubleTray60Price": {
+          "type": "number",
+          "description": "60-egg double tray price in INR"
+        },
+        "bulk100Price": {
+          "type": "number",
+          "description": "100-egg wholesale crate price in INR"
+        },
+        "inStock": {
+          "type": "boolean",
+          "description": "Whether fresh eggs are currently in stock"
+        },
+        "dailyHarvestCount": {
+          "type": "number",
+          "description": "Total eggs harvested today"
+        },
+        "harvestStamp": {
+          "type": "string",
+          "description": "Label describing today's morning harvest timestamp",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of the last rate update"
+        }
+      },
+      "required": [
+        "configId",
+        "ownerId",
+        "farmName",
+        "tamilFarmName",
+        "ownerName",
+        "ownerPhone",
+        "gpayUpiId",
+        "gpayName",
+        "deliveryFee",
+        "freeDeliveryThreshold",
+        "deliveryAreas",
+        "farmLocation",
+        "pricePerEgg",
+        "pack12Price",
+        "tray30Price",
+        "doubleTray60Price",
+        "bulk100Price",
+        "inStock",
+        "dailyHarvestCount",
+        "harvestStamp",
+        "updatedAt"
+      ]
+    },
+    "EggOrder": {
+      "title": "EggOrder",
+      "description": "Customer order record containing delivery details, verified GPay UTR, and fulfillment status.",
+      "type": "object",
+      "properties": {
+        "orderId": {
+          "type": "string",
+          "description": "Unique order identifier",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "ownerId": {
+          "type": "string",
+          "description": "UID of the creator or farm admin",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "customerName": {
+          "type": "string",
+          "description": "Full name of the customer",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "customerPhone": {
+          "type": "string",
+          "description": "10-digit mobile number of the customer",
+          "minLength": 10,
+          "maxLength": 15
+        },
+        "customerAddress": {
+          "type": "string",
+          "description": "Door number and street address",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "customerLandmark": {
+          "type": "string",
+          "description": "Optional nearby landmark",
+          "minLength": 0,
+          "maxLength": 150
+        },
+        "customerArea": {
+          "type": "string",
+          "description": "Town or area name",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "customerPincode": {
+          "type": "string",
+          "description": "Postal pincode",
+          "minLength": 0,
+          "maxLength": 12
+        },
+        "deliverySlot": {
+          "type": "string",
+          "description": "Preferred delivery time slot",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "packKey": {
+          "type": "string",
+          "description": "Selected egg pack identifier",
+          "enum": ["pack_12", "tray_30", "tray_60", "bulk_100"],
+          "minLength": 1,
+          "maxLength": 30
+        },
+        "packName": {
+          "type": "string",
+          "description": "Display name of the egg pack",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "quantity": {
+          "type": "number",
+          "description": "Number of packs ordered"
+        },
+        "totalEggs": {
+          "type": "number",
+          "description": "Total number of country eggs in the order"
+        },
+        "subtotal": {
+          "type": "number",
+          "description": "Item subtotal in INR"
+        },
+        "deliveryFee": {
+          "type": "number",
+          "description": "Delivery fee in INR"
+        },
+        "totalAmount": {
+          "type": "number",
+          "description": "Final total payable in INR"
+        },
+        "status": {
+          "type": "string",
+          "description": "Fulfillment pipeline stage",
+          "enum": ["pending_payment", "confirmed_packing", "out_for_delivery", "delivered", "cancelled"],
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "upiReferenceId": {
+          "type": "string",
+          "description": "12-digit UPI UTR reference number",
+          "minLength": 6,
+          "maxLength": 32
+        },
+        "estimatedDelivery": {
+          "type": "string",
+          "description": "Estimated delivery window description",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "riderName": {
+          "type": "string",
+          "description": "Assigned delivery rider name",
+          "minLength": 0,
+          "maxLength": 100
+        },
+        "riderPhone": {
+          "type": "string",
+          "description": "Assigned delivery rider phone number",
+          "minLength": 0,
+          "maxLength": 20
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Order creation server timestamp"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Order last update server timestamp"
+        }
+      },
+      "required": [
+        "orderId",
+        "ownerId",
+        "customerName",
+        "customerPhone",
+        "customerAddress",
+        "customerLandmark",
+        "customerArea",
+        "customerPincode",
+        "deliverySlot",
+        "packKey",
+        "packName",
+        "quantity",
+        "totalEggs",
+        "subtotal",
+        "deliveryFee",
+        "totalAmount",
+        "status",
+        "upiReferenceId",
+        "estimatedDelivery",
+        "riderName",
+        "riderPhone",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "AdminProfile": {
+      "title": "AdminProfile",
+      "description": "Trusted farm administrator registry document.",
+      "type": "object",
+      "properties": {
+        "adminId": {
+          "type": "string",
+          "description": "UID of the administrator",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "description": "Verified email of the administrator",
+          "minLength": 3,
+          "maxLength": 120
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation server timestamp"
+        }
+      },
+      "required": ["adminId", "email", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/storefront/{configId}": {
+      "schema": { "$ref": "#/entities/StorefrontConfig" },
+      "description": "Global farm rates and GPay payment configuration."
+    },
+    "/orders/{orderId}": {
+      "schema": { "$ref": "#/entities/EggOrder" },
+      "description": "Customer egg orders containing PII isolated to owner and admin."
+    },
+    "/admins/{adminId}": {
+      "schema": { "$ref": "#/entities/AdminProfile" },
+      "description": "Administrator lookup collection."
+    }
+  }
+}
